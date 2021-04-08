@@ -138,6 +138,12 @@ public class FireHydrant
     }
   }
 
+  public void cleanup()
+  {
+    index = null;
+    return;
+  }
+
   public ReferenceCountingSegment getIncrementedSegment()
   {
     ReferenceCountingSegment segment = adapter.get();
@@ -213,7 +219,7 @@ public class FireHydrant
     // Do not include IncrementalIndex in toString as AbstractIndex.toString() actually prints
     // all the rows in the index
     return "FireHydrant{" +
-           "queryable=" + adapter.get().getId() +
+           "queryable=" + (adapter.get() == null ? "swapped_null" : adapter.get().getId()) +
            ", count=" + count +
            '}';
   }

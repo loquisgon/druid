@@ -114,6 +114,9 @@ public class AppenderatorImpl implements Appenderator
   private static final int WARN_DELAY = 1000;
   private static final String IDENTIFIER_FILE_NAME = "identifier.json";
 
+  private static final int STATS_FOR_THESE_MANY_ROWS = 1000;
+  private static int rowCounter = 0;
+
   private final String myId;
   private final DataSchema schema;
   private final AppenderatorConfig tuningConfig;
@@ -163,10 +166,10 @@ public class AppenderatorImpl implements Appenderator
 
   /**
    * This constructor allows the caller to provide its own SinkQuerySegmentWalker.
-   *
+   * <p>
    * The sinkTimeline is set to the sink timeline of the provided SinkQuerySegmentWalker.
    * If the SinkQuerySegmentWalker is null, a new sink timeline is initialized.
-   *
+   * <p>
    * It is used by UnifiedIndexerAppenderatorsManager which allows queries on data associated with multiple
    * Appenderators.
    */
@@ -328,6 +331,25 @@ public class AppenderatorImpl implements Appenderator
           maxBytesTuningConfig
       ));
     }
+
+    // log some resource stats
+    if (rowCounter >= STATS_FOR_THESE_MANY_ROWS) {
+      String statsMessage = StringUtils.format(
+          "AGSTATSAG: "
+          + "numSinks: [%d], numHydrantsAcrossAllSinks: [%d], totalRows: [%d], rowsCurrentlyInMemory: [%d], bytesCurrentlyInMemory: [%d]",
+          sinks.size(),
+          sinks.values().stream().mapToInt(Iterables::size).sum(),
+          getTotalRowCount(),
+          rowsCurrentlyInMemory.get(),
+          bytesCurrentlyInMemory.get()
+      );
+      log.info(statsMessage);
+      rowCounter = 0;
+    } else {
+      rowCounter++;
+    }
+
+
     if (persist) {
       if (allowIncrementalPersists) {
         // persistAll clears rowsCurrentlyInMemory, no need to update it.
@@ -347,7 +369,9 @@ public class AppenderatorImpl implements Appenderator
           }
         }
 
-        if (!skipBytesInMemoryOverheadCheck && bytesCurrentlyInMemory.get() - bytesToBePersisted > maxBytesTuningConfig) {
+
+        if (!skipBytesInMemoryOverheadCheck
+            && bytesCurrentlyInMemory.get() - bytesToBePersisted > maxBytesTuningConfig) {
           // We are still over maxBytesTuningConfig even after persisting.
           // This means that we ran out of all available memory to ingest (due to overheads created as part of ingestion)
           final String alertMessage = StringUtils.format(
@@ -737,7 +761,8 @@ public class AppenderatorImpl implements Appenderator
   private ListenableFuture<?> pushBarrier()
   {
     return intermediateTempExecutor.submit(
-        (Runnable) () -> pushExecutor.submit(() -> {})
+        (Runnable) () -> pushExecutor.submit(() -> {
+        })
     );
   }
 
@@ -748,7 +773,6 @@ public class AppenderatorImpl implements Appenderator
    * @param identifier    sink identifier
    * @param sink          sink to push
    * @param useUniquePath true if the segment should be written to a path with a unique identifier
-   *
    * @return segment descriptor, or null if the sink is no longer valid
    */
   @Nullable
@@ -849,7 +873,11 @@ public class AppenderatorImpl implements Appenderator
           // semantics.
           () -> dataSegmentPusher.push(
               mergedFile,
-              sink.getSegment().withDimensions(IndexMerger.getMergedDimensionsFromQueryableIndexes(indexes, schema.getDimensionsSpec())),
+              sink.getSegment()
+                  .withDimensions(IndexMerger.getMergedDimensionsFromQueryableIndexes(
+                      indexes,
+                      schema.getDimensionsSpec()
+                  )),
               useUniquePath
           ),
           exception -> exception instanceof Exception,
@@ -1374,7 +1402,6 @@ public class AppenderatorImpl implements Appenderator
    *
    * @param indexToPersist hydrant to persist
    * @param identifier     the segment this hydrant is going to be part of
-   *
    * @return the number of rows persisted
    */
   private int persistHydrant(FireHydrant indexToPersist, SegmentIdWithShardSpec identifier)
@@ -1406,16 +1433,21 @@ public class AppenderatorImpl implements Appenderator
         );
 
         log.info(
-            "Flushed in-memory data for segment[%s] spill[%s] to disk in [%,d] ms (%,d rows).",
+            "Flushed in-memory data in [%s] for segment[%s] spill[%s] to disk in [%,d] ms (%,d rows).",
+            persistedFile.getAbsolutePath(),
             indexToPersist.getSegmentId(),
             indexToPersist.getCount(),
             (System.nanoTime() - startTime) / 1000000,
             numRows
         );
 
+
         indexToPersist.swapSegment(
-            new QueryableIndexSegment(indexIO.loadIndex(persistedFile), indexToPersist.getSegmentId())
+//            new QueryableIndexSegment(indexIO.loadIndex(persistedFile), indexToPersist.getSegmentId())
+            null
         );
+
+        //indexToPersist.cleanup();
 
         return numRows;
       }
