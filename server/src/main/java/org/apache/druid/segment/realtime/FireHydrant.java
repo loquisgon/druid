@@ -24,16 +24,19 @@ import com.google.common.collect.Iterables;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.Pair;
 import org.apache.druid.segment.IncrementalIndexSegment;
+import org.apache.druid.segment.QueryableIndexSegment;
 import org.apache.druid.segment.ReferenceCountingSegment;
 import org.apache.druid.segment.Segment;
 import org.apache.druid.segment.SegmentReference;
 import org.apache.druid.segment.StorageAdapter;
 import org.apache.druid.segment.incremental.IncrementalIndex;
 import org.apache.druid.timeline.SegmentId;
+import org.codehaus.plexus.util.FileUtils;
 import org.joda.time.Interval;
 
 import javax.annotation.Nullable;
 import java.io.Closeable;
+import java.io.File;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -45,6 +48,9 @@ public class FireHydrant
   private final int count;
   private final AtomicReference<ReferenceCountingSegment> adapter;
   private volatile IncrementalIndex index;
+
+  private String persistedFilePath;
+  private SegmentId persistedSegmentId;
 
   public FireHydrant(IncrementalIndex index, int count, SegmentId segmentId)
   {
@@ -60,6 +66,19 @@ public class FireHydrant
     this.index = null;
     this.adapter = new AtomicReference<>(ReferenceCountingSegment.wrapRootGenerationSegment(adapter));
     this.count = count;
+  }
+
+  public void setPersistedFilePath(String persistedFilePath) {
+    this.persistedFilePath = persistedFilePath;
+    persistedSegmentId = getSegmentId();
+  }
+  public String getPersistedFilePath() {
+    return persistedFilePath;
+  }
+
+  public SegmentId getPersistedSegmentId()
+  {
+    return persistedSegmentId;
   }
 
   public IncrementalIndex getIndex()

@@ -837,6 +837,12 @@ public class AppenderatorImpl implements Appenderator
       Closer closer = Closer.create();
       try {
         for (FireHydrant fireHydrant : sink) {
+          //agaqv
+          File persistedFile = org.apache.commons.io.FileUtils.getFile(fireHydrant.getPersistedFilePath());
+          fireHydrant.swapSegment(new QueryableIndexSegment(
+              indexIO.loadIndex(persistedFile),
+              fireHydrant.getPersistedSegmentId()
+          ));
           Pair<ReferenceCountingSegment, Closeable> segmentAndCloseable = fireHydrant.getAndIncrementSegment();
           final QueryableIndex queryableIndex = segmentAndCloseable.lhs.asQueryableIndex();
           log.debug("Segment[%s] adding hydrant[%s]", identifier, fireHydrant);
@@ -854,6 +860,8 @@ public class AppenderatorImpl implements Appenderator
             tuningConfig.getSegmentWriteOutMediumFactory(),
             tuningConfig.getMaxColumnsToMerge()
         );
+
+
 
         mergeFinishTime = System.nanoTime();
 
@@ -883,6 +891,12 @@ public class AppenderatorImpl implements Appenderator
           exception -> exception instanceof Exception,
           5
       );
+
+      // agaqv remove all mm segments restored
+      for (FireHydrant fireHydrant : sink) {
+        fireHydrant.swapSegment(null);
+      }
+
 
       final long pushFinishTime = System.nanoTime();
 
@@ -1441,7 +1455,8 @@ public class AppenderatorImpl implements Appenderator
             numRows
         );
 
-
+        // agaqv set the persistedFile in a new field in the indexToPersist (firehydrant)
+        indexToPersist.setPersistedFilePath(persistedFile.getAbsolutePath());
         indexToPersist.swapSegment(
 //            new QueryableIndexSegment(indexIO.loadIndex(persistedFile), indexToPersist.getSegmentId())
             null
