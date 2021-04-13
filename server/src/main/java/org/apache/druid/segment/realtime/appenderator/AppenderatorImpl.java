@@ -693,7 +693,12 @@ public class AppenderatorImpl implements Appenderator
     rowsCurrentlyInMemory.addAndGet(-numPersistedRows);
     bytesCurrentlyInMemory.addAndGet(-bytesPersisted);
 
-    log.info("Persisted rows[%,d] and bytes[%,d]", numPersistedRows, bytesPersisted);
+    log.info(
+        "Persisted rows[%,d], bytes[%,d] and hydrants[%,d]",
+        numPersistedRows,
+        bytesPersisted,
+        indexesToPersist.size()
+    );
 
     return future;
   }
@@ -860,7 +865,6 @@ public class AppenderatorImpl implements Appenderator
             tuningConfig.getSegmentWriteOutMediumFactory(),
             tuningConfig.getMaxColumnsToMerge()
         );
-
 
 
         mergeFinishTime = System.nanoTime();
