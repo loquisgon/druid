@@ -139,6 +139,7 @@ public class BatchAppenderatorDriver extends BaseAppenderatorDriver
   {
     final Set<SegmentIdWithShardSpec> requestedSegmentIdsForSequences = getAppendingSegments(sequenceNames);
 
+    // agaqv restore sinks to life here or thereabouts!
     final ListenableFuture<SegmentsAndCommitMetadata> future = Futures.transform(
         pushInBackground(null, requestedSegmentIdsForSequences, false),
         (AsyncFunction<SegmentsAndCommitMetadata, SegmentsAndCommitMetadata>) this::dropInBackground
