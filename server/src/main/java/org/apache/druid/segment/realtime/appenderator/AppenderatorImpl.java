@@ -135,7 +135,12 @@ public class AppenderatorImpl implements Appenderator
    * of any thread from {@link #drop}.
    */
   private final ConcurrentMap<SegmentIdWithShardSpec, Sink> sinks = new ConcurrentHashMap<>();
+
+  // + ag
   private final ConcurrentMap<Sink, SegmentIdWithShardSpec> sinkIdentifiers = new ConcurrentHashMap<>();
+  private final Map<SegmentIdWithShardSpec, List<String>> identifiersToHydrantPaths = new HashMap<>();
+  // - ag
+
   private final Set<SegmentIdWithShardSpec> droppingSinks = Sets.newConcurrentHashSet();
   private final VersionedIntervalTimeline<String, Sink> sinkTimeline;
   private final long maxBytesTuningConfig;
@@ -763,17 +768,7 @@ public class AppenderatorImpl implements Appenderator
       final boolean useUniquePath
   )
   {
-    final Map<SegmentIdWithShardSpec, Sink> theSinks = new HashMap<>();
-    for (final SegmentIdWithShardSpec identifier : identifiers) {
-      final Sink sink = sinks.get(identifier);
-      if (sink == null) {
-        throw new ISE("No sink for identifier: %s", identifier);
-      }
-      theSinks.put(identifier, sink);
-      if (sink.finishWriting()) {
-        totalRows.addAndGet(-sink.getNumRows());
-      }
-    }
+
 
     return Futures.transform(
         // We should always persist all segments regardless of the input because metadata should be committed for all
@@ -781,6 +776,22 @@ public class AppenderatorImpl implements Appenderator
         persistAll(committer),
         (Function<Object, SegmentsAndCommitMetadata>) commitMetadata -> {
           final List<DataSegment> dataSegments = new ArrayList<>();
+
+          // aqv, restore sinks here....
+          sinkIdentifiers.clear();
+          final Map<SegmentIdWithShardSpec, Sink> theSinks = new HashMap<>();
+          for (final SegmentIdWithShardSpec identifier : identifiers) {
+            Sink sink = sinks.get(identifier);
+            if (sink == null) {
+              // it's ok, we deleted it earlier to save space...
+              sink = getOrCreateSink(identifier);
+            }
+            sinkIdentifiers.put(sink,identifier);
+            theSinks.put(identifier, sink);
+            if (sink.finishWriting()) {
+              totalRows.addAndGet(-sink.getNumRows());
+            }
+          }
 
           log.debug(
               "Building and pushing segments: %s",
@@ -893,19 +904,24 @@ public class AppenderatorImpl implements Appenderator
       final long startTime = System.nanoTime();
       List<QueryableIndex> indexes = new ArrayList<>();
       Closer closer = Closer.create();
+      FireHydrant fireHydrant;
+      List<FireHydrant> fireHydrants = new ArrayList<>();
+      int hydrantNumber = 0; // just fake it for now...
       try {
-        for (FireHydrant fireHydrant : sink) {
+        for (String persistedFilePath : identifiersToHydrantPaths.get(sinkIdentifiers.get(sink))) {
           //agaqv
-          File persistedFile = org.apache.commons.io.FileUtils.getFile(fireHydrant.getPersistedFilePath());
-          fireHydrant.swapSegment(new QueryableIndexSegment(
+          File persistedFile = org.apache.commons.io.FileUtils.getFile(persistedFilePath);
+          QueryableIndexSegment indexToMerge = new QueryableIndexSegment(
               indexIO.loadIndex(persistedFile),
-              fireHydrant.getPersistedSegmentId()
-          ));
+              identifier.asSegmentId());
+          fireHydrant = new FireHydrant(indexToMerge, hydrantNumber++);
+          //fireHydrant.swapSegment(indexToMerge);
           Pair<ReferenceCountingSegment, Closeable> segmentAndCloseable = fireHydrant.getAndIncrementSegment();
           final QueryableIndex queryableIndex = segmentAndCloseable.lhs.asQueryableIndex();
-          log.debug("Segment[%s] adding hydrant[%s]", identifier, fireHydrant);
+          log.info("Segment[%s] adding hydrant[%s]", identifier, fireHydrant);
           indexes.add(queryableIndex);
           closer.register(segmentAndCloseable.rhs);
+          fireHydrants.add(fireHydrant);
         }
 
         mergedFile = indexMerger.mergeQueryableIndex(
@@ -950,10 +966,9 @@ public class AppenderatorImpl implements Appenderator
       );
 
       // agaqv remove all mm segments restored
-      for (FireHydrant fireHydrant : sink) {
-        fireHydrant.swapSegment(null);
+      for (FireHydrant fh : fireHydrants) {
+        fh.swapSegment(null);
       }
-
 
       final long pushFinishTime = System.nanoTime();
 
@@ -1502,6 +1517,9 @@ public class AppenderatorImpl implements Appenderator
             tuningConfig.getIndexSpecForIntermediatePersists(),
             tuningConfig.getSegmentWriteOutMediumFactory()
         );
+        // save to resurrect them at merge time:
+        identifiersToHydrantPaths.computeIfAbsent(identifier, k -> new ArrayList<>())
+                                 .add(persistedFile.getAbsolutePath());
 
         log.info(
             "Flushed in-memory data in [%s] for segment[%s] spill[%s] to disk in [%,d] ms (%,d rows).",
